@@ -15,7 +15,6 @@ from . import __version__
 from .constants import DEFAULT_MODEL, MODELS
 from .display import console, print_banner, print_file_tree, print_project_list
 from .projects import (
-    PROJECTS_BASE,
     create_project,
     delete_project,
     get_project,
