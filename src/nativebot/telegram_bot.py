@@ -26,7 +26,7 @@ from telegram.ext import (
 )
 
 from .agent import run_generation, extract_session_id, extract_result_text, extract_metadata
-from .chat import build_first_prompt, build_followup_prompt, _parse_activity_from_block
+from .chat import build_first_prompt, build_followup_prompt, _parse_activity_from_block, save_photos_to_project, MAX_PHOTOS
 from .constants import DEFAULT_MODEL, MODELS
 from .projects import (
     create_project,
@@ -135,6 +135,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/model <code>sonnet|opus|haiku</code> — Switch model\n"
         "/close — Close active project\n"
         "/delete <code>AppName</code> — Delete a project\n\n"
+        "📷 <b>Photos:</b> Send up to 9 photos, then type a message.\n"
+        "Claude will see them and use them as reference for your app.\n\n"
         "Or just send a message to chat with Claude about your active project!",
         parse_mode=ParseMode.HTML,
     )
@@ -408,6 +410,170 @@ async def cmd_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- Chat Handler ---
 
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle photo messages — save photos and queue them for the next chat turn."""
+    project = _get_active_project(update.effective_chat.id)
+    if not project:
+        await update.message.reply_text(
+            "No active project. Use /create or /open first.\nSend /start for help."
+        )
+        return
+
+    project_dir = Path(project["path"])
+    uploads_dir = project_dir / ".nativebot" / "uploads"
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+
+    # Initialize pending photos for this chat
+    if "pending_photos" not in context.chat_data:
+        context.chat_data["pending_photos"] = []
+
+    # Download the photo (largest size)
+    photo = update.message.photo[-1]  # highest resolution
+    file = await photo.get_file()
+    ext = Path(file.file_path).suffix if file.file_path else ".jpg"
+    filename = f"photo_{int(time.time())}_{photo.file_unique_id}{ext}"
+    dest = uploads_dir / filename
+    await file.download_to_drive(str(dest))
+
+    context.chat_data["pending_photos"].append(str(dest))
+    count = len(context.chat_data["pending_photos"])
+
+    caption = update.message.caption or ""
+
+    if count >= MAX_PHOTOS:
+        context.chat_data["pending_photos"] = context.chat_data["pending_photos"][:MAX_PHOTOS]
+        await update.message.reply_text(f"📷 {MAX_PHOTOS} photos attached (max reached). Send a message to chat with Claude about them.")
+    elif caption:
+        # If the photo has a caption, treat it as the message + photo together
+        photo_paths = [Path(p) for p in context.chat_data["pending_photos"]]
+        context.chat_data["pending_photos"] = []
+        await _handle_chat_with_photos(update, context, caption, photo_paths)
+    else:
+        await update.message.reply_text(
+            f"📷 {count} photo(s) attached. Send more or type a message to chat with Claude about them."
+        )
+
+
+async def _handle_chat_with_photos(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    user_input: str,
+    photo_paths: list[Path],
+):
+    """Process a chat message with attached photos."""
+    project = _get_active_project(update.effective_chat.id)
+    project_dir = Path(project["path"])
+    project_name = project["name"]
+
+    conversation = get_conversation(project_dir)
+    session_id: Optional[str] = None
+    if conversation:
+        for msg in reversed(conversation):
+            if msg.get("session_id"):
+                session_id = msg["session_id"]
+                break
+
+    is_first = len(conversation) == 0
+
+    sessions = _load_sessions()
+    model_alias = sessions.get(f"{update.effective_chat.id}_model", "sonnet")
+    model = MODELS.get(model_alias, DEFAULT_MODEL)
+
+    if is_first:
+        prompt = build_first_prompt(project_dir, user_input, photo_paths or None)
+    else:
+        prompt = build_followup_prompt(project_dir, user_input, photo_paths or None)
+
+    conversation.append({"role": "user", "content": user_input})
+
+    await update.effective_chat.send_action(ChatAction.TYPING)
+    photo_note = f" (📷 {len(photo_paths)} photos)" if photo_paths else ""
+    status_msg = await update.message.reply_text(
+        f"🤖 Working on <b>{_escape(project_name)}</b>...{photo_note}",
+        parse_mode=ParseMode.HTML,
+    )
+
+    start_time = time.time()
+    all_messages: list[dict] = []
+    last_activity = ""
+    last_update_time = 0.0
+
+    try:
+        async for message in run_generation(
+            prompt=prompt,
+            project_dir=project_dir,
+            model=model,
+            session_id=session_id,
+        ):
+            all_messages.append(message)
+
+            msg_type = message.get("type", "")
+            content = message.get("content")
+            if msg_type == "assistant" and isinstance(content, list):
+                for block in content:
+                    activity = _parse_activity_from_block(str(block), str(project_dir))
+                    if activity:
+                        clean_activity = re.sub(r'\[/?[a-z ]+\]', '', activity)
+                        if clean_activity != last_activity and time.time() - last_update_time > 3:
+                            last_activity = clean_activity
+                            last_update_time = time.time()
+                            elapsed = int(time.time() - start_time)
+                            try:
+                                await status_msg.edit_text(
+                                    f"🤖 <b>{_escape(project_name)}</b> — {elapsed}s\n{_escape(clean_activity)}",
+                                    parse_mode=ParseMode.HTML,
+                                )
+                            except Exception:
+                                pass
+
+            if time.time() - last_update_time > 5:
+                await update.effective_chat.send_action(ChatAction.TYPING)
+
+            if message.get("subtype") == "success":
+                new_sid = message.get("session_id")
+                if new_sid:
+                    session_id = new_sid
+
+    except Exception as e:
+        await status_msg.edit_text(f"❌ Error: {_escape(str(e))}", parse_mode=ParseMode.HTML)
+        save_conversation(project_dir, conversation)
+        return
+
+    subprocess.run(["npm", "install"], cwd=project_dir, capture_output=True, text=True)
+
+    duration = time.time() - start_time
+    result_text = extract_result_text(all_messages)
+    meta = extract_metadata(all_messages)
+    new_sid = extract_session_id(all_messages)
+    if new_sid:
+        session_id = new_sid
+
+    turns = meta.get("num_turns", 0)
+    cost = meta.get("total_cost_usd", 0)
+    parts = [f"{duration:.0f}s"]
+    if turns:
+        parts.append(f"{turns} turns")
+    if cost:
+        parts.append(f"${cost:.4f}")
+
+    summary = f"✅ Done! ({', '.join(parts)})"
+
+    try:
+        await status_msg.delete()
+    except Exception:
+        pass
+
+    response = f"{summary}\n\n{result_text}" if result_text else summary
+    await _send_long(update, response)
+
+    conversation.append({
+        "role": "assistant",
+        "content": result_text or "(no text response)",
+        "session_id": session_id,
+    })
+    save_conversation(project_dir, conversation)
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle regular text messages — forward to Claude as chat turns."""
     project = _get_active_project(update.effective_chat.id)
@@ -423,6 +589,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_input = update.message.text.strip()
 
     if not user_input:
+        return
+
+    # Check for pending photos from previous photo messages
+    photo_paths = []
+    if context.chat_data.get("pending_photos"):
+        photo_paths = [Path(p) for p in context.chat_data["pending_photos"]]
+        context.chat_data["pending_photos"] = []
+
+    if photo_paths:
+        await _handle_chat_with_photos(update, context, user_input, photo_paths)
         return
 
     # Load conversation and session
@@ -570,6 +746,9 @@ def run_telegram_bot(token: str):
     app.add_handler(CommandHandler("preview", cmd_preview))
     app.add_handler(CommandHandler("model", cmd_model))
     app.add_handler(CommandHandler("delete", cmd_delete))
+
+    # Photo messages
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
     # Text messages go to chat handler
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))

@@ -8,10 +8,14 @@ persistence.
 import asyncio
 import os
 import platform
+import shutil
 import subprocess
 import time
 from pathlib import Path
 from typing import Optional
+
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"}
+MAX_PHOTOS = 9
 
 from .agent import run_generation, extract_session_id, extract_result_text, extract_metadata
 from .constants import DEFAULT_MODEL, SYSTEM_RULES
@@ -24,13 +28,50 @@ from .projects import (
 )
 
 
-def build_first_prompt(project_dir: Path, user_prompt: str) -> str:
+def save_photos_to_project(project_dir: Path, photo_paths: list[str]) -> list[Path]:
+    """Copy photos into the project's .nativebot/uploads/ directory.
+
+    Returns list of saved file paths (absolute).
+    """
+    uploads_dir = project_dir / ".nativebot" / "uploads"
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    saved = []
+    for path_str in photo_paths[:MAX_PHOTOS]:
+        src = Path(path_str).expanduser().resolve()
+        if not src.is_file():
+            continue
+        if src.suffix.lower() not in IMAGE_EXTENSIONS:
+            continue
+        dest = uploads_dir / src.name
+        # Avoid name collisions
+        counter = 1
+        while dest.exists():
+            dest = uploads_dir / f"{src.stem}_{counter}{src.suffix}"
+            counter += 1
+        shutil.copy2(src, dest)
+        saved.append(dest)
+    return saved
+
+
+def _build_photo_prompt(photo_paths: list[Path]) -> str:
+    """Build a prompt snippet telling Claude to read the attached photos."""
+    if not photo_paths:
+        return ""
+    lines = [f"\nThe user attached {len(photo_paths)} photo(s). Read each one to view them:"]
+    for p in photo_paths:
+        lines.append(f"  - {p}")
+    return "\n".join(lines)
+
+
+def build_first_prompt(project_dir: Path, user_prompt: str, photo_paths: list[Path] | None = None) -> str:
     """Build the first prompt with file listing and directory context."""
     files = get_project_files(project_dir)
     file_listing = "\n".join(f"  {f}" for f in files[:100])
     extra = ""
     if len(files) > 100:
         extra = f"\n  ... and {len(files) - 100} more files"
+
+    photo_section = _build_photo_prompt(photo_paths or [])
 
     return f"""You are working inside: {project_dir}
 
@@ -41,16 +82,18 @@ This project already has these files:
 
 Review the existing code and build on top of it.
 
-User expo app generation request: {user_prompt}"""
+User expo app generation request: {user_prompt}{photo_section}"""
 
 
-def build_followup_prompt(project_dir: Path, user_prompt: str) -> str:
+def build_followup_prompt(project_dir: Path, user_prompt: str, photo_paths: list[Path] | None = None) -> str:
     """Build follow-up prompts with same rules."""
+    photo_section = _build_photo_prompt(photo_paths or [])
+
     return f"""You are working inside: {project_dir}
 
 {SYSTEM_RULES}
 
-{user_prompt}"""
+{user_prompt}{photo_section}"""
 
 
 def _parse_activity_from_block(block_str: str, project_dir_str: str) -> Optional[str]:
@@ -332,6 +375,7 @@ async def chat_session(project_dir: Path, model: str = DEFAULT_MODEL):
 
     is_first = len(conversation) == 0
     turn_count = 0
+    pending_photos: list[Path] = []
     project_name = metadata.get("name", project_dir.name)
 
     console.print(f"[bold]Project:[/bold] {project_name}")
@@ -347,6 +391,7 @@ async def chat_session(project_dir: Path, model: str = DEFAULT_MODEL):
     console.print("[dim]  submit        — Submit to App Store / Google Play[/dim]")
     console.print("[dim]  env           — Set up Supabase keys (for auth/database)[/dim]")
     console.print("[dim]  files         — Show project file tree[/dim]")
+    console.print("[dim]  photo         — Attach photos (up to 9) for Claude to see[/dim]")
     console.print("[dim]  quit          — Exit chat[/dim]")
     console.print()
 
@@ -395,11 +440,60 @@ async def chat_session(project_dir: Path, model: str = DEFAULT_MODEL):
             _submit(project_dir, project_name, lower)
             continue
 
+        if lower.startswith("photo"):
+            # photo command: collect image paths
+            parts = user_input.split()[1:]  # paths after "photo"
+            if not parts:
+                console.print("[bold]Attach photos for Claude to see (up to 9)[/bold]")
+                console.print("[dim]Enter image paths, one per line. Empty line when done.[/dim]")
+                parts = []
+                while len(parts) < MAX_PHOTOS:
+                    try:
+                        p = console.input("[dim]  path:[/dim] ").strip()
+                    except (EOFError, KeyboardInterrupt):
+                        break
+                    if not p:
+                        break
+                    parts.append(p)
+
+            if not parts:
+                console.print("[dim]No photos added.[/dim]")
+                console.print()
+                continue
+
+            saved = save_photos_to_project(project_dir, parts)
+            if saved:
+                pending_photos.extend(saved)
+                console.print(f"[green]Attached {len(saved)} photo(s).[/green] Now type your message.")
+            else:
+                console.print("[red]No valid images found. Supported: png, jpg, jpeg, gif, webp[/red]")
+            console.print()
+            continue
+
+        # --- Detect image paths in the message ---
+        attached_photos: list[Path] = list(pending_photos)  # photos from photo command
+        pending_photos.clear()
+
+        # Also scan message for inline image paths
+        import re as _re
+        for token in _re.split(r'\s+', user_input):
+            candidate = Path(token).expanduser()
+            if candidate.is_file() and candidate.suffix.lower() in IMAGE_EXTENSIONS:
+                saved = save_photos_to_project(project_dir, [str(candidate)])
+                attached_photos.extend(saved)
+
+        if len(attached_photos) > MAX_PHOTOS:
+            attached_photos = attached_photos[:MAX_PHOTOS]
+            console.print(f"[yellow]Limited to {MAX_PHOTOS} photos.[/yellow]")
+
+        if attached_photos:
+            console.print(f"[dim]📷 {len(attached_photos)} photo(s) attached[/dim]")
+
         # --- AI generation ---
         if is_first and turn_count == 0:
-            prompt = build_first_prompt(project_dir, user_input)
+            prompt = build_first_prompt(project_dir, user_input, attached_photos or None)
         else:
-            prompt = build_followup_prompt(project_dir, user_input)
+            prompt = build_followup_prompt(project_dir, user_input, attached_photos or None)
 
         conversation.append({"role": "user", "content": user_input})
 
