@@ -419,9 +419,46 @@ def _setup_env(project_dir: Path):
     console.print()
 
 
+# Track whether preview has been launched for a project
+_preview_launched: set[str] = set()
+
+
+def _is_expo_running(mobile_dir: Path) -> bool:
+    """Check if an Expo dev server is already running in the mobile directory."""
+    try:
+        result = subprocess.run(
+            ["lsof", "-ti", "-sTCP:LISTEN", "-c", "node"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            # Check if any node process has mobile_dir as cwd
+            for pid in result.stdout.strip().split("\n"):
+                try:
+                    cwd_check = subprocess.run(
+                        ["lsof", "-p", pid, "-Fn"],
+                        capture_output=True, text=True, timeout=3,
+                    )
+                    if str(mobile_dir) in cwd_check.stdout:
+                        return True
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    # Fallback: if we launched it before in this session, assume it's still running
+    return str(mobile_dir) in _preview_launched
+
+
 def _launch_preview_background(project_dir: Path, web: bool = False):
-    """Launch Expo preview in a new terminal window."""
+    """Launch Expo preview in a new terminal window. Reuses existing if already running."""
     mobile_dir = get_mobile_dir(project_dir)
+
+    # Check if preview is already running for this project
+    if _is_expo_running(mobile_dir):
+        console.print("[green]Preview is already running![/green]")
+        console.print("[dim]Expo hot-reloads automatically when code changes. Check your phone.[/dim]")
+        console.print()
+        return
+
     expo_cmd = "npx expo start --clear --port 0" + (" --web" if web else "")
     full_cmd = f"cd {mobile_dir} && npm install && {expo_cmd}"
 
@@ -433,15 +470,16 @@ def _launch_preview_background(project_dir: Path, web: bool = False):
         script_path.write_text(f"#!/bin/bash\n{full_cmd}\n")
         script_path.chmod(0o755)
         subprocess.Popen(["open", str(script_path)])
+        _preview_launched.add(str(mobile_dir))
     elif system == "Linux":
         # Try common terminal emulators
         for term in ["gnome-terminal", "xterm", "konsole"]:
-            import shutil
             if shutil.which(term):
                 if term == "gnome-terminal":
                     subprocess.Popen([term, "--", "bash", "-c", full_cmd])
                 else:
                     subprocess.Popen([term, "-e", f"bash -c '{full_cmd}'"])
+                _preview_launched.add(str(mobile_dir))
                 break
         else:
             console.print(f"[dim]Run in another terminal: {full_cmd}[/dim]")
