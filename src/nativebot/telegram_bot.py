@@ -9,6 +9,7 @@ import html
 import json
 import logging
 import re
+import socket
 import subprocess
 import time
 from pathlib import Path
@@ -270,6 +271,18 @@ async def cmd_model(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Model set to <b>{_escape(alias)}</b> ({_escape(MODELS[alias])})", parse_mode=ParseMode.HTML)
 
 
+def _get_local_ip() -> str:
+    """Get the machine's local network IP address."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "localhost"
+
+
 async def cmd_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /preview command — start Expo and send URL/QR back."""
     project = _get_active_project(update.effective_chat.id)
@@ -286,17 +299,15 @@ async def cmd_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     # Install deps first
-    install = subprocess.run(
-        ["npm", "install"],
-        cwd=project_dir,
-        capture_output=True,
-        text=True,
+    install = await asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda: subprocess.run(["npm", "install"], cwd=project_dir, capture_output=True, text=True),
     )
     if install.returncode != 0:
         await update.message.reply_text("❌ npm install failed. Check your project for errors.")
         return
 
-    # Start expo in background and capture the URL
+    # Start expo in background
     process = subprocess.Popen(
         ["npx", "expo", "start", "--clear"],
         cwd=project_dir,
@@ -305,45 +316,57 @@ async def cmd_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text=True,
     )
 
-    # Read output until we find the URL/QR or timeout
-    expo_url = None
+    # Read output in a thread to avoid blocking the event loop
+    loop = asyncio.get_event_loop()
+    metro_port = None
     start_time = time.time()
-    timeout = 60  # seconds
+    timeout = 60
 
-    try:
+    def _read_until_ready():
+        """Read Expo output until we detect the server is ready. Returns the port."""
+        nonlocal metro_port
         while time.time() - start_time < timeout:
             line = process.stdout.readline()
             if not line:
-                await asyncio.sleep(0.1)
+                if process.poll() is not None:
+                    break  # Process exited
                 continue
 
-            # Look for the exp:// or expo-go URL
-            url_match = re.search(r'(exp://[\S]+)', line)
-            if url_match:
-                expo_url = url_match.group(1)
-                break
+            # Expo outputs: "Waiting on http://localhost:8081"
+            port_match = re.search(r'http://localhost:(\d+)', line)
+            if port_match:
+                metro_port = port_match.group(1)
 
-            # Also look for the metro URL with QR
-            metro_match = re.search(r'(http://[\d.:]+)', line)
-            if metro_match and not expo_url:
-                expo_url = metro_match.group(1)
+            # Ready indicator
+            if "Logs for your project" in line or "Waiting on" in line:
+                if metro_port:
+                    return metro_port
 
-            # Check for "Logs for your project" or similar ready indicator
-            if "Logs for your project" in line or "Metro waiting on" in line:
-                if expo_url:
-                    break
+            # Also check for exp:// URL directly (some Expo versions)
+            exp_match = re.search(r'(exp://[\S]+)', line)
+            if exp_match:
+                return exp_match.group(1)
 
-    except Exception as e:
-        logger.error(f"Preview error: {e}")
+        return metro_port
 
-    if expo_url:
+    result = await loop.run_in_executor(None, _read_until_ready)
+
+    if result:
+        # Build the exp:// URL from local IP + port
+        local_ip = _get_local_ip()
+        if result.startswith("exp://"):
+            expo_url = result
+        else:
+            expo_url = f"exp://{local_ip}:{result}"
+
         await update.message.reply_text(
             f"✅ <b>{_escape(project_name)}</b> is running!\n\n"
             f"📱 Open in Expo Go:\n<code>{_escape(expo_url)}</code>\n\n"
             "On your phone:\n"
-            "• iOS: Open Camera → scan QR code in your terminal\n"
+            "• iOS: Open Camera app → paste URL in Safari\n"
             "• Android: Open Expo Go → Enter URL above\n\n"
-            "<i>Preview is running in the background. Keep chatting — it won't interrupt.</i>",
+            f"🌐 Local: <code>http://localhost:{_escape(metro_port or '8081')}</code>\n\n"
+            "<i>Preview is running in the background. Keep chatting!</i>",
             parse_mode=ParseMode.HTML,
         )
 
@@ -359,7 +382,7 @@ async def cmd_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Kill the process if we couldn't get a URL
         process.terminate()
         await update.message.reply_text(
-            "⚠️ Expo started but couldn't detect the preview URL.\n\n"
+            "❌ Expo failed to start. Check your project for errors.\n\n"
             "Run manually on your machine:\n"
             f"<code>cd {_escape(str(project_dir))} && npx expo start</code>",
             parse_mode=ParseMode.HTML,
