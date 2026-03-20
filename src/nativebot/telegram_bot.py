@@ -295,6 +295,22 @@ async def cmd_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
     project_dir = Path(project["path"])
     project_name = project["name"]
 
+    # Check if preview is already running for this chat
+    existing = (context.bot_data.get("preview_processes") or {}).get(update.effective_chat.id)
+    if existing and existing.get("process") and existing["process"].poll() is None:
+        # Process is still running — just resend the URL
+        if existing.get("project") == project_name:
+            await update.message.reply_text(
+                f"✅ <b>{_escape(project_name)}</b> is already running!\n\n"
+                f"📱 Open in Expo Go:\n<code>{_escape(existing['url'])}</code>\n\n"
+                "<i>Expo hot-reloads automatically when code changes. Keep chatting!</i>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+        else:
+            # Different project — kill old preview first
+            existing["process"].terminate()
+
     await update.message.reply_text(
         f"📱 Starting preview for <b>{_escape(project_name)}</b>...\nThis may take a moment.",
         parse_mode=ParseMode.HTML,
