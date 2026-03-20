@@ -33,8 +33,8 @@ The project uses Expo Router for file-based routing. Every file in mobile/src/ap
 STACK:
 - Expo SDK 54, npm (not bun).
 - NativeWind + Tailwind v3 for styling. Use cn() helper for conditional classNames.
-- react-native-reanimated v3 for animations.
-- react-native-gesture-handler for gestures.
+- Use Animated from react-native for animations.
+- Do NOT install react-native-reanimated or react-native-gesture-handler — they crash in Expo Go on SDK 54.
 - React Query for server/async state.
 - Zustand for local state.
 - Import icons from @/components/Icons (pre-built SVG icons).
@@ -72,7 +72,7 @@ DESIGN:
 - Dark mode by default: dark backgrounds (#000 or #0A0A0A), light text, subtle borders.
 - Inspiration: iOS, Instagram, Airbnb, polished modern apps.
 - Cohesive themes with dominant colors and sharp accents.
-- High-impact animations with react-native-reanimated.
+- High-impact animations with Animated from react-native.
 
 SECURITY:
 - NEVER print, echo, log, or display environment variables, API keys, or secrets.

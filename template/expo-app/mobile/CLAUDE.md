@@ -2,10 +2,9 @@
   Expo SDK 54, React Native 0.81, npm (not bun).
   React Query for server/async state.
   NativeWind + Tailwind v3 for styling.
-  react-native-reanimated v3 for animations (preferred over Animated from react-native).
-  react-native-gesture-handler for gestures.
   @/components/Icons for SVG icons (pre-built, works on all platforms).
   All packages are pre-installed. DO NOT install new packages unless they are @expo-google-font packages or pure JavaScript helpers like lodash, dayjs, etc.
+  IMPORTANT: Do NOT install react-native-reanimated or react-native-gesture-handler — they crash in Expo Go on SDK 54. Use Animated from react-native for animations.
 </stack>
 
 <structure>
