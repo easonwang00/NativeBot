@@ -16,10 +16,8 @@ from typing import Optional
 from .constants import SKIP_DIRS
 
 # Base directory for all projects
-# Uses NATIVEBOT_PROJECTS_DIR env var, or ./projects/ in the repo
-_PACKAGE_DIR_FOR_BASE = Path(__file__).resolve().parent
-_REPO_ROOT_FOR_BASE = _PACKAGE_DIR_FOR_BASE.parent.parent
-PROJECTS_BASE = Path(os.environ.get("NATIVEBOT_PROJECTS_DIR", str(_REPO_ROOT_FOR_BASE / "projects")))
+# Uses NATIVEBOT_PROJECTS_DIR env var, or ~/.nativebot/projects/
+PROJECTS_BASE = Path(os.environ.get("NATIVEBOT_PROJECTS_DIR", str(Path.home() / ".nativebot" / "projects")))
 
 # Template directory -- look relative to the package, then fall back
 _PACKAGE_DIR = Path(__file__).resolve().parent
