@@ -19,7 +19,7 @@ Describe your app → Claude builds it → Preview on your phone → Submit to A
 ## Quick Start
 
 ```bash
-pipx install nativebot   # or: pip install nativebot
+pipx install "nativebot[telegram]"   # or: pip install "nativebot[telegram]"
 claude login
 nativebot
 ```
@@ -80,7 +80,7 @@ nativebot delete MyApp     # Delete a project
 Build apps from your phone — chat with NativeBot on Telegram.
 
 ```bash
-pipx install nativebot[telegram]
+pipx install "nativebot[telegram]"
 
 # 1. Message @BotFather on Telegram → /newbot → copy token
 # 2. Start the bot
