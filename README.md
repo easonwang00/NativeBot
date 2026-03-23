@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="assets/nativebot.png" alt="NativeBot" width="120" />
+<img src="assets/nativebot.png" alt="Open-Base44" width="120" />
 
-# NativeBot
+# Open-Base44
 
 **Your open-source personal app developer. Runs on your machine. Builds real apps.**
 
@@ -12,13 +12,13 @@ No cloud. No account. No limits. Your code stays on your machine.
 
 [![MIT License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![PyPI](https://img.shields.io/pypi/v/nativebot)](https://pypi.org/project/nativebot)
-[![GitHub Stars](https://img.shields.io/github/stars/easonwang00/nativebot?style=social)](https://github.com/easonwang00/nativebot)
+[![GitHub Stars](https://img.shields.io/github/stars/easonwang00/open-base44?style=social)](https://github.com/easonwang00/open-base44)
 
 </div>
 
 ---
 
-Most AI app builders give you throwaway demos. NativeBot gives you **real, shippable mobile apps** — built with Expo React Native, running on your phone, ready for the App Store. Not mockups. Not prototypes. Production code.
+Most AI app builders give you throwaway demos. Open-Base44 gives you **real, shippable mobile apps** — built with Expo React Native, running on your phone, ready for the App Store. Not mockups. Not prototypes. Production code.
 
 It's your **personal app developer** that lives in your terminal. It doesn't phone home. It doesn't store your code in someone else's cloud. Everything runs locally, powered by your Claude subscription. You own every line.
 
@@ -56,7 +56,7 @@ nativebot delete MyApp     # Delete a project
 
 ## Chat From Your Phone — 15 sec read
 
-NativeBot includes a self-hosted Telegram bot. Create your own private bot, run it on your machine. Build apps from your phone while you're on the couch.
+Open-Base44 includes a self-hosted Telegram bot. Create your own private bot, run it on your machine. Build apps from your phone while you're on the couch.
 
 ```bash
 # 1. Open Telegram → @BotFather → /newbot → copy token
@@ -77,9 +77,9 @@ Same projects, same `~/.nativebot/projects/` directory. CLI and Telegram work in
 4. **Preview** — Scan QR with Expo Go on your phone, hot-reloads on every change
 5. **Ship** — Build with EAS and submit to App Store / Google Play
 
-## Why NativeBot? — 15 sec read
+## Why Open-Base44? — 15 sec read
 
-| | Replit | Bolt | Lovable | Vibecode | **NativeBot** |
+| | Replit | Bolt | Lovable | Vibecode | **Open-Base44** |
 |--|--------|------|---------|----------|------------|
 | Open source | - | - | - | - | **Yes** |
 | Runs locally | - | - | - | - | **Yes** |
@@ -89,7 +89,7 @@ Same projects, same `~/.nativebot/projects/` directory. CLI and Telegram work in
 | Chat from phone | - | - | - | - | **Yes** |
 | Free forever | - | - | - | - | **Yes** |
 
-**The difference:** Other tools build demos in their cloud. NativeBot builds real apps on your machine. You own the code. You own the project. You can open it in VS Code, Cursor, or Xcode. There's no vendor lock-in because there's no vendor.
+**The difference:** Other tools build demos in their cloud. Open-Base44 builds real apps on your machine. You own the code. You own the project. You can open it in VS Code, Cursor, or Xcode. There's no vendor lock-in because there's no vendor.
 
 ## Preview & Deploy — 10 sec read
 
@@ -118,7 +118,7 @@ eas submit --platform ios        # Ship to App Store
 ## Architecture — 15 sec read
 
 ```
-You (terminal/Telegram)     NativeBot CLI          Claude Agent SDK
+You (terminal/Telegram)     Open-Base44 CLI          Claude Agent SDK
 ┌─────────────────┐    ┌────────────────┐    ┌──────────────────┐
 │ "Add login page" │───▶│ Chat + Preview │───▶│ Claude AI         │
 │                  │◀───│ Self-heal      │◀───│ Reads/Writes code │
