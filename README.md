@@ -12,7 +12,7 @@ No cloud. No account. No limits. Your code stays on your machine.
 
 [![MIT License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![PyPI](https://img.shields.io/pypi/v/nativebot)](https://pypi.org/project/nativebot)
-[![GitHub Stars](https://img.shields.io/github/stars/easonwang00/nativebot?style=social)](https://github.com/easonwang00/nativebot)
+[![GitHub Stars](https://img.shields.io/github/stars/easonwang00/open-base44?style=social)](https://github.com/easonwang00/open-base44)
 
 </div>
 
